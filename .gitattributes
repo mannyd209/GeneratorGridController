@@ -1,0 +1,22 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source files
+*.ino text diff=cpp
+*.cpp text diff=cpp
+*.h text diff=cpp
+*.c text diff=cpp
+*.hpp text diff=cpp
+
+# Documents
+*.md text diff=markdown
+*.txt text
+LICENSE text
+
+# Scripts
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# Binary files
+*.bin binary
+*.hex binary

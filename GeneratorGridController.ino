@@ -29,19 +29,22 @@ void printStatus() {
 
 // Add helper function for mode changes
 void changeMode(SystemMode newMode) {
-    if(currentMode != newMode) {  // Only process actual changes
+    if(currentMode != newMode) {
+        // Update mode first
         currentMode = newMode;
         genControl.setModePtr(&currentMode);
         
-        // Update HomeSpan switches
+        // Force immediate HomeSpan updates
         syncHomeSpan();
-        
-        // Force immediate update
         homeSpan.poll();
         
-        Serial.printf("Mode changed to: %s\n", 
-            newMode == MODE_AUTO ? "AUTO" : 
+        // Log mode change
+        Serial.printf("MODE CHANGE: Switching to %s mode\n", 
+            newMode == MODE_AUTO ? "AUTO" :
             newMode == MODE_MANUAL ? "MANUAL" : "OFF");
+            
+        // Additional HomeSpan polls for reliability
+        homeSpan.poll();
     }
 }
 
@@ -92,9 +95,14 @@ void setup() {
     // Initialize HomeSpan first (before any mode changes)
     setupHomeSpan();
     
+    // Force multiple polls during setup
+    for(int i = 0; i < 3; i++) {
+        homeSpan.poll();
+    }
+    
     // Set initial mode after HomeSpan is ready
-    delay(1000);
     changeMode(DEFAULT_MODE);
+    syncHomeSpan();  // Ensure initial state is correct
     
     printStatus();
 }
@@ -107,6 +115,15 @@ bool delayWithModeCheck(unsigned long delayTime, SystemMode expectedMode) {
     while (millis() - startTime < delayTime) {
         processSerialCommand();
         homeSpan.poll();  // Poll HomeSpan to handle HomeKit events
+        
+        // Poll more frequently during long delays
+        static unsigned long lastPoll = 0;
+        if (millis() - lastPoll >= 50) {
+            lastPoll = millis();
+            homeSpan.poll();
+            syncHomeSpan();  // Keep UI in sync
+        }
+        
         if (currentMode != startMode) {
             Serial.printf("Mode changed from %d to %d - interrupting\n", startMode, currentMode);
             return false;
@@ -118,51 +135,34 @@ bool delayWithModeCheck(unsigned long delayTime, SystemMode expectedMode) {
 
 void handleAutoMode() {
     SystemMode expectedMode = MODE_AUTO;
-    if (currentMode != expectedMode) return;  // Early exit if mode changed
+    if (currentMode != expectedMode) return;
     
     bool currentGridStatus = digitalRead(GRID_MONITOR_PIN) == LOW;
     
+    // Keep HomeKit responsive during grid monitoring
+    homeSpan.poll();
+    
     if (currentGridStatus != gridStatus && (millis() - lastGridCheck > GRID_MONITOR_DEBOUNCE)) {
-        if (!currentGridStatus) {  // Grid potentially down
+        if (!currentGridStatus) {
             Serial.println("Grid outage detected - waiting 10s to confirm...");
-            if (!delayWithModeCheck(GRID_OUTAGE_CONFIRM_DELAY, expectedMode)) return;  // Interruptible delay
+            if (!delayWithModeCheck(GRID_OUTAGE_CONFIRM_DELAY, expectedMode)) return;
             
             currentGridStatus = digitalRead(GRID_MONITOR_PIN) == LOW;
             if (!currentGridStatus) {
                 gridStatus = false;
                 Serial.println("Grid outage confirmed - initiating generator start sequence");
+                
+                // Keep HomeKit responsive during generator start
+                homeSpan.poll();
+                
                 if (genControl.startGenerator()) {
-                    if (!delayWithModeCheck(TRANSFER_SWITCH_DELAY, expectedMode)) return;  // Interruptible delay
+                    if (!delayWithModeCheck(TRANSFER_SWITCH_DELAY, expectedMode)) return;
                     genControl.setTransferSwitch(true);
+                    syncHomeSpan();  // Update UI after successful operation
                 } else {
                     Serial.println("Generator start failed in Auto mode - switching to Off mode");
-                    
-                    // Handle mode change the same way as manual mode
-                    for(int i = 0; i < 3; i++) {  // Try up to 3 times to ensure update
-                        changeMode(MODE_OFF);
-                        syncHomeSpan();
-                        homeSpan.poll();
-                        delay(100);
-                    }
-                }
-            }
-        } else {  // Grid potentially restored
-            Serial.println("Grid power detected - waiting 10s to confirm...");
-            if (!delayWithModeCheck(GRID_RESTORE_CONFIRM_DELAY, expectedMode)) return;  // Interruptible delay
-            
-            if (digitalRead(GRID_MONITOR_PIN) == LOW) {
-                gridStatus = true;
-                Serial.println("Grid restoration confirmed - pausing for 10s");
-                if (!delayWithModeCheck(GRID_RESTORE_CONFIRM_DELAY, expectedMode)) return;  // Interruptible delay
-                
-                if (digitalRead(GRID_MONITOR_PIN) == LOW) {
-                    Serial.println("Grid stable - shutting down generator");
-                    genControl.setTransferSwitch(false);
-                    if (!delayWithModeCheck(GRID_RESTORE_CONFIRM_DELAY, expectedMode)) return;  // Interruptible delay
-                    genControl.stopGenerator();
-                } else {
-                    Serial.println("Grid unstable - maintaining generator operation");
-                    gridStatus = false;
+                    changeMode(MODE_OFF);
+                    syncHomeSpan();
                 }
             }
         }
@@ -172,46 +172,82 @@ void handleAutoMode() {
 
 void handleManualMode() {
     SystemMode expectedMode = MODE_MANUAL;
-    if (currentMode != expectedMode) return;  // Early exit if mode changed
+    if (currentMode != expectedMode) return;
     
     if (genControl.getState() == GEN_OFF) {
         Serial.println("Manual mode - waiting 10s before starting generator...");
-        if (!delayWithModeCheck(MANUAL_START_PREP_DELAY, expectedMode)) return;  // Interruptible delay
+        
+        // Keep HomeKit responsive during startup sequence
+        if (!delayWithModeCheck(MANUAL_START_PREP_DELAY, expectedMode)) return;
+        
+        homeSpan.poll();  // Additional poll before critical operation
         
         if (!genControl.startGenerator()) {
             Serial.println("Generator start failed in Manual mode - switching to Off mode");
-            changeMode(MODE_OFF);  // This will handle HomeKit sync
-            syncHomeSpan();  // Force another sync
-            homeSpan.poll(); // Force another HomeKit update
-            delay(100);      // Give HomeKit a moment to process
+            changeMode(MODE_OFF);
+            syncHomeSpan();
+            homeSpan.poll();
         } else {
-            if (!delayWithModeCheck(TRANSFER_SWITCH_DELAY, expectedMode)) return;  // Interruptible delay
+            if (!delayWithModeCheck(TRANSFER_SWITCH_DELAY, expectedMode)) return;
             genControl.setTransferSwitch(true);
+            syncHomeSpan();  // Update UI after successful operation
         }
     }
 }
 
 void handleOffMode() {
     if (genControl.getState() != GEN_OFF) {
+        // Keep HomeKit responsive during shutdown
+        homeSpan.poll();
         delay(GRID_MONITOR_DEBOUNCE);
+        
         genControl.setTransferSwitch(false);
+        homeSpan.poll();  // Poll between operations
+        
         genControl.stopGenerator();
+        syncHomeSpan();  // Update UI after shutdown complete
     }
 }
 
+void syncHomeSpan() {
+    // Update all switches immediately
+    for(int i = 0; i < HomeSpanSwitch::switchCount; i++) {
+        HomeSpanSwitch* sw = HomeSpanSwitch::switches[i];
+        if(sw) {
+            bool shouldBeOn = (sw->mode == currentMode);
+            if(sw->power->getVal() != shouldBeOn) {
+                sw->power->setVal(shouldBeOn, true);  // Force immediate update
+                homeSpan.poll();  // Process each change immediately
+            }
+        }
+    }
+    homeSpan.poll();  // Final update
+}
+
 void loop() {
-    homeSpan.poll();  // Poll HomeSpan first
-    processSerialCommand();
-    
     static unsigned long lastPoll = 0;
-    if (millis() - lastPoll >= 50) {  // Poll every 50ms
+    static unsigned long lastSync = 0;
+    
+    // Regular HomeSpan polling
+    if (millis() - lastPoll >= 50) {
         lastPoll = millis();
-        homeSpan.poll();  // Additional polling for state changes
+        homeSpan.poll();
     }
     
+    // Periodic state sync
+    if (millis() - lastSync >= 1000) {  // Sync every second
+        lastSync = millis();
+        syncHomeSpan();
+    }
+    
+    processSerialCommand();
+    
+    // Handle mode-specific operations
     if (currentMode == MODE_OFF && genControl.getState() != GEN_OFF) {
         genControl.setTransferSwitch(false);
+        homeSpan.poll();  // Poll between operations
         genControl.stopGenerator();
+        syncHomeSpan();
     } else {
         switch (currentMode) {
             case MODE_AUTO:
@@ -226,5 +262,5 @@ void loop() {
         }
     }
     
-    delay(50);  // Small delay to prevent tight loops
+    delay(50);
 }

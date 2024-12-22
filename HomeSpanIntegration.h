@@ -134,19 +134,7 @@ void setupHomeSpan() {
     homeSpan.poll();  // Initial poll to establish connection
 }
 
-void syncHomeSpan() {
-    // Update all switches immediately
-    for(int i = 0; i < HomeSpanSwitch::switchCount; i++) {
-        HomeSpanSwitch* sw = HomeSpanSwitch::switches[i];
-        if(sw) {
-            bool shouldBeOn = (sw->mode == currentMode);
-            if(sw->power->getVal() != shouldBeOn) {
-                sw->power->setVal(shouldBeOn, true);  // Force immediate update
-                homeSpan.poll();  // Process each change immediately
-            }
-        }
-    }
-    homeSpan.poll();  // Final update
-}
+// Just declare the function (remove the implementation)
+void syncHomeSpan();
 
 #endif

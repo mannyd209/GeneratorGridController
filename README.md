@@ -46,7 +46,7 @@ Required connections:
    - GPIO pin configuration
 4. Upload to your ESP32
 
-## Required Configuration (config.h)
+### Required Configuration (config.h)
 
 
 ## Operation

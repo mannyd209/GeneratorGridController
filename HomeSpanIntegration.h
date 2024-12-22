@@ -26,34 +26,39 @@ public:
     }
 
     boolean update() override {
-        if(power->updated()) {  // Only process if value actually changed
+        if(power->updated()) {
             boolean newState = power->getNewVal();
             
             if(newState) {
-                // Switch being turned on
-                changeMode(mode);
-                
-                // Turn off other switches immediately
+                // Immediately update all switches before mode change
                 for(int i = 0; i < switchCount; i++) {
                     if(switches[i] != this) {
-                        switches[i]->power->setVal(false);
+                        switches[i]->power->setVal(false, true);  // Force immediate update
                     }
                 }
+                
+                // Set this switch on and force update
+                power->setVal(true, true);
+                
+                // Change mode after UI updates
+                changeMode(mode);
+                homeSpan.poll();  // Force immediate update
             } else {
-                // Prevent switch from being turned off directly
-                // Instead activate OFF mode switch
+                // Prevent direct turn-off except for OFF mode
                 if(mode != MODE_OFF) {
-                    power->setVal(true);  // Keep this switch on
+                    power->setVal(true, true);  // Keep this switch on
+                    // Find and activate OFF mode switch
                     for(int i = 0; i < switchCount; i++) {
                         if(switches[i]->mode == MODE_OFF) {
-                            switches[i]->power->setVal(true);  // This will trigger OFF mode
+                            switches[i]->power->setVal(true, true);
+                            homeSpan.poll();  // Force immediate update
                             break;
                         }
                     }
                 }
             }
         }
-        return(true);
+        return true;
     }
 };
 
@@ -130,23 +135,18 @@ void setupHomeSpan() {
 }
 
 void syncHomeSpan() {
-    // Ensure all switches are in correct state
+    // Update all switches immediately
     for(int i = 0; i < HomeSpanSwitch::switchCount; i++) {
         HomeSpanSwitch* sw = HomeSpanSwitch::switches[i];
         if(sw) {
             bool shouldBeOn = (sw->mode == currentMode);
             if(sw->power->getVal() != shouldBeOn) {
                 sw->power->setVal(shouldBeOn, true);  // Force immediate update
-                homeSpan.poll();  // Process the change immediately
+                homeSpan.poll();  // Process each change immediately
             }
         }
     }
-    
-    // Additional polls to ensure state propagation
-    for(int i = 0; i < 3; i++) {
-        homeSpan.poll();
-        delay(50);
-    }
+    homeSpan.poll();  // Final update
 }
 
 #endif

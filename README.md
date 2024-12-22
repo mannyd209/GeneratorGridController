@@ -129,5 +129,5 @@ Output includes:
 
 ## Credits
 - HomeSpan library: [HomeSpan on GitHub](https://github.com/HomeSpan/HomeSpan)
-- Developed by: Your Name
+- Developed by: Manuel Duarte
 - Version: 1.0.0

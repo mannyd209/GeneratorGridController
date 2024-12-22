@@ -7,8 +7,8 @@
 //=============================================================================
 
 // WiFi Settings (Required)
-#define WIFI_SSID "Your_WiFi_Name"        // Your WiFi network name
-#define WIFI_PASSWORD "Your_Password"      // Your WiFi password
+#define WIFI_SSID "Your WiFi Network Name"        // Your WiFi network name
+#define WIFI_PASSWORD "Your WiFi Password"      // Your WiFi password
 
 // HomeKit Settings
 #define HOMEKIT_SETUP_PIN "12345678"      // 8-digit code for HomeKit pairing
